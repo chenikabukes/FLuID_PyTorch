@@ -1,1 +1,4 @@
 venv/
+CIFAR10_vgg/
+FEMNIST/
+Shakespeare/
