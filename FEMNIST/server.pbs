@@ -1,0 +1,21 @@
+#!/bin/bash
+ 
+#PBS -l walltime=4:00:00,select=1:ncpus=1:mem=16gb
+#PBS -N femServer1
+#PBS -A st-prashnr-1
+#PBS -m abe
+#PBS -M iwang05@student.ubc.ca
+#PBS -o output_server.txt
+#PBS -e error_server.txt
+ 
+################################################################################
+ 
+module load gcc
+module load cuda
+
+echo $PBS_NODEFILE;cat $PBS_NODEFILE
+
+echo ${PYTHONPATH}
+cd $PBS_O_WORKDIR
+
+./run_femnist.sh 0
