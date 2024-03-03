@@ -29,7 +29,7 @@ import flwr as fl
 import numpy as np
 from time import time
 import torch
-from torchmetrics.clustering import MutualInfoScore
+
 import torchvision
 from flwr.common import EvaluateIns, EvaluateRes, FitIns, FitRes, ParametersRes, Weights
 import numpy as np
@@ -37,47 +37,8 @@ import matplotlib.pyplot as plt
 from mine import MINE
 from sklearn.feature_selection import mutual_info_regression
 
-#import ssl
-#ssl._create_default_https_context = ssl._create_unverified_context
-
 import utils
 
-# pylint: disable=no-member
-#DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-# pylint: enable=no-member
-# Generates data by sampling from two correlated Gaussian variables
-# dim = 1
-# variance = 0.2
-# sampleSize = 2000
-
-# xSamples = np.sign(np.random.normal(0., 1., [sampleSize, dim]))
-# ySamples = xSamples + np.random.normal(0., np.sqrt(variance), [sampleSize, dim])
-# pyx = np.exp(-(ySamples - xSamples) ** 2 / (2 * variance))
-# pyxMinus = np.exp(-(ySamples + 1) ** 2 / (2 * variance))
-# pyxPlus = np.exp(-(ySamples - 1) ** 2 / (2 * variance))
-
-# mi = np.average(np.log(pyx / (0.5 * pyxMinus + 0.5 * pyxPlus)))
-
-# miEstimator = MINE(dim, archSpecs={
-#     'layerSizes': [32] * 1,
-#     'activationFunctions': ['relu'] * 1
-# }, divergenceMeasure='KL', learningRate=1e-3)
-
-
-# ySamplesMarginal = np.random.permutation(ySamples)
-
-# estimatedMI, estimationHistory = miEstimator.calcMI(xSamples, ySamples, xSamples, ySamplesMarginal,
-#                                                     batchSize=sampleSize, numEpochs=2000)
-
-# print("Real MI: {}, estimated MI: {}".format(mi, estimatedMI))
-# print("Estimated MI: {}".format(estimatedMI))
-# epochs = np.arange(len(estimationHistory))
-# plt.plot(epochs, estimationHistory)
-# plt.plot(epochs, mi * np.ones(len(estimationHistory)))
-# plt.xlabel('Epochs')
-# plt.ylabel('Estimated MI')
-# plt.legend(['Estimated', 'Real'])
-# plt.show()
 
 def get_weights(model: torch.nn.ModuleList) -> fl.common.Weights:
     """Get model weights as a list of NumPy ndarrays."""
@@ -94,7 +55,36 @@ def set_weights(model: torch.nn.ModuleList, weights: fl.common.Weights) -> None:
     )
     model.load_state_dict(state_dict, strict=True)
 
-
+def match_dimensions_and_calculate_mi(gradients, inputs, sample_size=1024):
+    """
+    Randomly sample elements from gradients and inputs to match dimensions and calculate MI.
+    sample_size: Number of elements to sample, ensuring it's less than min(input elements, gradient elements)
+    """
+    inputs_flat = inputs.view(-1)  # [16*3*32*32]
+    
+    # Ensure sample_size is feasible
+    sample_size = min(sample_size, inputs_flat.size(0), gradients.size(0))
+    
+    # Randomly sample indices
+    indices = np.random.choice(inputs_flat.size(0), sample_size, replace=False)
+    
+    # Sample from inputs and gradients
+    inputs_sample = inputs_flat[torch.tensor(indices)].cpu().numpy()
+    gradients_sample = gradients[torch.tensor(indices)].cpu().numpy()
+    
+    mi_estimate, log = estimate_mi(
+            data=(inputs_sample, gradients_sample),  
+            estimator_name='js',  
+            hidden_dims=[32, 32], 
+            neg_samples=16,
+            batch_size=128,
+            max_epochs=500,
+            valid_percentage=0.1,
+            evaluation_batch_size=256,
+            device='cpu',  
+        )
+    
+    return mi_estimate  
 
 class CifarClient(fl.client.Client):
     """Flower client implementing CIFAR-10 image classification using
@@ -134,6 +124,56 @@ class CifarClient(fl.client.Client):
         # instantiate model
         self.model = m()
 
+    # def fit(self, ins: FitIns) -> FitRes:
+    #     print(f"Client {self.cid}: fit")
+
+    #     weights: Weights = fl.common.parameters_to_weights(ins.parameters)
+    #     config = ins.config
+    #     fit_begin = timeit.default_timer()
+
+    #     # Get training config
+    #     epochs = int(config["epochs"])
+    #     batch_size = int(config["batch_size"])
+    #     pin_memory = bool(config["pin_memory"])
+    #     num_workers = int(config["num_workers"])
+
+    #     # fix_for_drop
+    #     p = float(config["p"])
+    #     if (p != self.p):
+    #         print("changing p from " + str(self.p) + " to " + str(p))
+    #         self.p = p
+    #         self.model = utils.load_model("ResNet18", self.p)
+    #         self.model.to(self.device)
+
+    #     # Set model parameters
+    #     set_weights(self.model, weights)
+
+    #     if torch.cuda.is_available():
+    #         kwargs = {
+    #             "num_workers": num_workers,
+    #             "pin_memory": pin_memory,
+    #             "drop_last": True,
+    #         }
+    #     else:
+    #         kwargs = {"drop_last": True}
+
+        # # Train model
+        # trainloader = torch.utils.data.DataLoader(
+        #     self.trainset, batch_size=batch_size, shuffle=True, **kwargs
+        # )
+        # t = time()
+        # utils.train(self.model, trainloader, epochs=epochs, device=self.device)
+        # fitTime = time() - t
+
+    #     # Return the refined weights and the number of examples used for training
+    #     weights_prime: Weights = get_weights(self.model)
+    #     params_prime = fl.common.weights_to_parameters(weights_prime)
+    #     num_examples_train = len(self.trainset)
+    #     metrics = {"duration": timeit.default_timer() - fit_begin}
+    #     return FitRes(
+    #         parameters=params_prime, num_examples=num_examples_train, metrics=metrics, fit_duration=fitTime
+    #     )
+
     def fit(self, ins: FitIns) -> FitRes:
         print(f"Client {self.cid}: fit")
 
@@ -167,80 +207,51 @@ class CifarClient(fl.client.Client):
         else:
             kwargs = {"drop_last": True}
 
-        # Train model
+            # Train model
         trainloader = torch.utils.data.DataLoader(
             self.trainset, batch_size=batch_size, shuffle=True, **kwargs
         )
         t = time()
-        utils.train(self.model, trainloader, epochs=epochs, device=self.device)
+        gradients, representative_inputs = utils.train_mi(self.model, trainloader, epochs=epochs, device=self.device)
+        print(gradients.shape)
+        print(representative_inputs.shape)
         fitTime = time() - t
+
+        # Calculate mutual information
+        mi_estimate = match_dimensions_and_calculate_mi(gradients, representative_inputs)
+        print(f"Client {self.cid}: Mutual Information after fit round: {mi_estimate}")
 
         # Return the refined weights and the number of examples used for training
         weights_prime: Weights = get_weights(self.model)
         params_prime = fl.common.weights_to_parameters(weights_prime)
         num_examples_train = len(self.trainset)
         metrics = {"duration": timeit.default_timer() - fit_begin}
+        # Include MI in the metrics
+        metrics.update({"mutual_information": mi_estimate})
         return FitRes(
             parameters=params_prime, num_examples=num_examples_train, metrics=metrics, fit_duration=fitTime
         )
+        
+    def evaluate(self, ins: EvaluateIns) -> EvaluateRes:
+        print(f"Client {self.cid}: evaluate")
 
-    # def evaluate(self, ins: EvaluateIns) -> EvaluateRes:
-    #     print(f"Client {self.cid}: evaluate")
+        weights = fl.common.parameters_to_weights(ins.parameters)
 
-    #     weights = fl.common.parameters_to_weights(ins.parameters)
+        # Use provided weights to update the local model
+        set_weights(self.model, weights)
+        set_weights(self.model, weights)
 
-    #     # Use provided weights to update the local model
-    #     set_weights(self.model, weights)
-    #     set_weights(self.model, weights)
+        # Evaluate the updated model on the local dataset
+        testloader = torch.utils.data.DataLoader(
+            self.testset, batch_size=32, shuffle=False
+        )
+        loss, accuracy = utils.test(self.model, testloader, device=self.device)
 
-    #     # Evaluate the updated model on the local dataset
-    #     testloader = torch.utils.data.DataLoader(
-    #         self.testset, batch_size=32, shuffle=False
-    #     )
-    #     loss, accuracy = utils.test(self.model, testloader, device=self.device)
-
-    #     # Return the number of evaluation examples and the evaluation result (loss)
-    #     metrics = {"accuracy": float(accuracy)}
-    #     return EvaluateRes(
-    #         num_examples=len(self.testset), loss=float(loss), metrics=metrics
-    #     )
-    # def evaluate(self, ins: EvaluateIns) -> EvaluateRes:
-    #     print(f"Client {self.cid}: evaluate")
-
-    #     weights = fl.common.parameters_to_weights(ins.parameters)
-
-    #     # Use provided weights to update the local model
-    #     set_weights(self.model, weights)
-
-    #     # Evaluate the updated model on the local dataset
-    #     testloader = torch.utils.data.DataLoader(self.testset, batch_size=32, shuffle=False)
-    #     loss, accuracy = utils.test(self.model, testloader, device=self.device)
-
-    #     # Prepare a batch of data for MI calculation
-    #     with torch.no_grad():  # Ensure no gradients are computed during evaluation
-    #         batch_joint = next(iter(testloader))
-    #         xSamplesJoint, labelsJoint = batch_joint
-    #         xSamplesJoint = xSamplesJoint.to(self.device)
-    #         outputsJoint = self.model(xSamplesJoint).cpu().detach().numpy()
-    #         labelsJoint = labelsJoint.cpu().detach().numpy()
-
-    #     # Optionally, fetch a different batch for the marginal distribution or shuffle xSamplesJoint
-    #     xSamplesMarginal = np.random.permutation(outputsJoint)  # This is a simple approach to break the dependency
-
-    #     # Labels as ySamples and outputs as xSamples in this context
-    #     labelsJoint_reshaped = labelsJoint[:, np.newaxis]  
-    #     ySamplesMarginal = np.random.permutation(labelsJoint_reshaped)
-    #     print("shape of labelsJoint_reshaped", labelsJoint_reshaped.shape)
-    #     print("shape of xSamplesJoint", xSamplesJoint.shape)
-    #     print("shape of ySamplesMarginal", ySamplesMarginal.shape)
-    #     print("shape of xSamplesMarginal", xSamplesMarginal.shape)
-    #     # Calculate mutual information using MINE
-    #     miEstimation = self.mine.calcMI(outputsJoint, labelsJoint_reshaped, xSamplesMarginal, ySamplesMarginal, batchSize=32, numEpochs=200)
-
-    #     # Add MI estimation to metrics
-    #     metrics = {"accuracy": float(accuracy), "mutual_info": miEstimation}
-
-    #     return EvaluateRes(num_examples=len(self.testset), loss=float(loss), metrics=metrics)
+        # Return the number of evaluation examples and the evaluation result (loss)
+        metrics = {"accuracy": float(accuracy)}
+        return EvaluateRes(
+            num_examples=len(self.testset), loss=float(loss), metrics=metrics
+        )
 
     # def evaluate(self, ins: EvaluateIns) -> EvaluateRes:
     #     print(f"Client {self.cid}: evaluate")
@@ -258,18 +269,18 @@ class CifarClient(fl.client.Client):
     #         outputsJoint = self.model(xSamplesJoint).cpu().detach().numpy()  # Model outputs as x
     #         labelsJoint = labelsJoint.cpu().detach().numpy()  # Corresponding labels as y
 
-    #     # Then, call estimate_mi with outputsJoint and labelsJoint as data
-    #     mi_estimate, log = estimate_mi(
-    #         data=(outputsJoint, labelsJoint),  # Pass the model outputs and labels as data
-    #         estimator_name='js',  # The mutual information estimator to use
-    #         hidden_dims=[32, 32],  # The hidden layers for the neural architectures
-    #         neg_samples=16,  # The number of negative samples used
-    #         batch_size=128,  # The batch size used for training
-    #         max_epochs=500,  # Number of maximum training epochs
-    #         valid_percentage=0.1,  # The percentage of data to use for validation
-    #         evaluation_batch_size=256,  # The batch size used for evaluation
-    #         device='cpu',  # The training device
-    #     )
+        # # Then, call estimate_mi with outputsJoint and labelsJoint as data
+        # mi_estimate, log = estimate_mi(
+        #     data=(outputsJoint, labelsJoint),  # Pass the model outputs and labels as data
+        #     estimator_name='js',  # The mutual information estimator to use
+        #     hidden_dims=[32, 32],  # The hidden layers for the neural architectures
+        #     neg_samples=16,  # The number of negative samples used
+        #     batch_size=128,  # The batch size used for training
+        #     max_epochs=500,  # Number of maximum training epochs
+        #     valid_percentage=0.1,  # The percentage of data to use for validation
+        #     evaluation_batch_size=256,  # The batch size used for evaluation
+        #     device='cpu',  # The training device
+        # )
 
 
     #     print(f"Estimated Mutual Information: {mi_estimate} nats")
@@ -294,122 +305,6 @@ class CifarClient(fl.client.Client):
     #     plt.close('all')  
 
     #     return EvaluateRes(num_examples=len(self.testset), loss=float(loss), metrics=metrics)
-
-
-    # def evaluate(self, ins: EvaluateIns) -> EvaluateRes:
-    #     print(f"Client {self.cid}: evaluate")
-
-    #     weights = fl.common.parameters_to_weights(ins.parameters)
-    #     set_weights(self.model, weights)  # Use provided weights to update the local model
-
-    #     testloader = torch.utils.data.DataLoader(self.testset, batch_size=32, shuffle=False)
-    #     loss, accuracy = utils.test(self.model, testloader, device=self.device)  # Evaluate the updated model
-
-    #     # Initialize the Mutual Information scorer
-    #     mi_score = MutualInfoScore()
-
-    #     # Prepare a batch of data for MI calculation
-    #     with torch.no_grad():  # Ensure no gradients are computed during evaluation
-    #         for batch in testloader:
-    #             xSamplesJoint, labelsJoint = batch
-    #             xSamplesJoint = xSamplesJoint.to(self.device)
-    #             outputs = self.model(xSamplesJoint).argmax(dim=1).cpu()  
-
-    #             # Calculate MI for the batch and accumulate
-    #             mi_score.update(outputs, labelsJoint)
-
-    #     # Finalize MI score calculation
-    #     final_mi_score = mi_score.compute()
-
-    #     print(f"Estimated Mutual Information: {final_mi_score.item()} nats")
-
-    #     metrics = {"accuracy": float(accuracy), "mutual_info": final_mi_score.item()}  # Add MI estimation to metrics
-
-    #     return EvaluateRes(num_examples=len(self.testset), loss=float(loss), metrics=metrics)
-
-
-    # def evaluate(self, ins: EvaluateIns) -> EvaluateRes:
-    #     print(f"Client {self.cid}: evaluate")
-
-    #     weights = fl.common.parameters_to_weights(ins.parameters)
-    #     set_weights(self.model, weights)  # Use provided weights to update the local model
-
-    #     testloader = torch.utils.data.DataLoader(self.testset, batch_size=32, shuffle=False)
-    #     loss, accuracy = utils.test(self.model, testloader, device=self.device) 
-
-    #     # Initialize the Mutual Information scorer
-    #     mi_score = MutualInfoScore()
-    #     mi_values = []
-
-    #     # Prepare data for MI calculation
-    #     with torch.no_grad():  # Ensure no gradients are computed during evaluation
-    #         for batch in testloader:
-    #             xSamplesJoint, labelsJoint = batch
-    #             xSamplesJoint = xSamplesJoint.to(self.device)
-    #             outputs = self.model(xSamplesJoint).argmax(dim=1).cpu()
-    #             # Update the MI scorer with predictions and targets for this batch
-    #             mi_score.update(outputs, labelsJoint)
-    #             batch_mi = mi_score(outputs, labelsJoint).item()
-    #             mi_values.append(batch_mi)
-
-    #     # Compute the overall MI after all batches have been processed
-    #     final_mi_score = mi_score.compute()
-
-    #     print(f"Estimated Mutual Information: {final_mi_score.item()} nats")
-
-    #     # Plotting the MI values
-    #     epochs = list(range(1, len(mi_values) + 1))
-    #     plt.plot(epochs, mi_values, marker='o', linestyle='-')
-    #     plt.title(f'Mutual Information Over Epochs - Client {self.cid}')
-    #     plt.xlabel('Epoch')
-    #     plt.ylabel('Mutual Information')
-    #     plt.grid(True)
-
-    #     current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    #     filename = f'./MIPlots/mutual_information_client_{self.cid}_{current_time}.png'
-
-    #     plt.savefig(filename)  
-    #     plt.close() 
-
-    #     metrics = {"accuracy": float(accuracy), "mutual_info": final_mi_score.item()}  
-
-    #     return EvaluateRes(num_examples=len(self.testset), loss=float(loss), metrics=metrics)
-
-
-    def evaluate(self, ins: EvaluateIns) -> EvaluateRes:
-        print(f"Client {self.cid}: evaluate")
-
-        weights = fl.common.parameters_to_weights(ins.parameters)
-        set_weights(self.model, weights)  # Use provided weights to update the local model
-
-        testloader = torch.utils.data.DataLoader(self.testset, batch_size=32, shuffle=False)
-        loss, accuracy = utils.test(self.model, testloader, device=self.device) 
-
-        # Initialize the Mutual Information scorer
-        mi_score = MutualInfoScore()
-        mi_values = []
-
-        # Prepare data for MI calculation
-        with torch.no_grad():  # Ensure no gradients are computed during evaluation
-            for batch in testloader:
-                xSamplesJoint, labelsJoint = batch
-                xSamplesJoint = xSamplesJoint.to(self.device)
-                outputs = self.model(xSamplesJoint).argmax(dim=1).cpu()
-                # Update the MI scorer with predictions and targets for this batch
-                mi_values.append(mi_score(outputs, labelsJoint))
-
-        # Compute the overall MI after all batches have been processed
-        fig_, ax_ = mi_score.plot(mi_values)
-        fig_.savefig(f'./MIPlots/mutual_information_plot_client_{self.cid}.png')
-        plt.show()
-        final_mi_score = mi_score.compute()
-
-        print(f"Estimated Mutual Information: {final_mi_score.item()} nats")
-
-        metrics = {"accuracy": float(accuracy), "mutual_info": final_mi_score.item()}  
-
-        return EvaluateRes(num_examples=len(self.testset), loss=float(loss), metrics=metrics)
-
 
 
 

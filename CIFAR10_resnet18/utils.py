@@ -176,6 +176,56 @@ def load_femnist(cids):
 
     return trainset, testset
 
+def train_mi(
+    net: Net,
+    trainloader: torch.utils.data.DataLoader,
+    epochs: int,
+    device: torch.device,  # pylint: disable=no-member
+) -> torch.Tensor:
+    """Train the network and return the gradients of the parameters."""
+    # Define loss and optimizer
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.SGD(net.parameters(), lr=0.12, momentum=0.9)
+
+    print(f"Training {epochs} epoch(s) w/ {len(trainloader)} batches each")
+    t = time()
+    last_images = None
+    # Train the network
+    for epoch in range(epochs):  # loop over the dataset multiple times
+        running_loss = 0.0
+        for i, (images, labels) in enumerate(trainloader, 0):
+            images, labels = images.to(device), labels.to(device)
+
+            # zero the parameter gradients
+            optimizer.zero_grad()
+
+            last_images = images
+
+            # forward + backward + optimize
+            outputs = net(images)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+
+            # print statistics
+            running_loss += loss.item()
+            if i % 2000 == 1999:  # print every 2000 mini-batches
+                print("[%d, %5d] loss: %.3f" % (epoch + 1, i + 1, running_loss / 2000))
+                running_loss = 0.0
+
+    print(f"Epoch took: {time() - t:.2f} seconds")
+
+    # Collect gradients after training
+    gradients = []
+    for parameters in net.parameters():
+        gradients.append(parameters.grad.view(-1))
+    gradients = torch.cat(gradients)
+    # Detach the last batch of images and move them to CPU (if necessary) for MI calculation
+    representative_inputs = last_images.detach().cpu()
+
+    return gradients, representative_inputs
+
+
 def train(
     net: Net,
     trainloader: torch.utils.data.DataLoader,
