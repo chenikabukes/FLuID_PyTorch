@@ -18,6 +18,7 @@
 import argparse
 from collections import OrderedDict
 from typing import Callable, Dict, Optional, Tuple
+from client import plot_mutual_information
 
 import flwr as fl
 import numpy as np
@@ -91,6 +92,11 @@ parser.add_argument(
 parser.add_argument("--pin_memory", action="store_true")
 args = parser.parse_args()
 
+def plot_mi_for_clients(server, client_manager):
+    """Plot mutual information for each client after training."""
+    clients = client_manager.all()
+    for client in clients:
+        plot_mutual_information(client)
 
 def main() -> None:
     """Start server and train five rounds."""
@@ -128,6 +134,9 @@ def main() -> None:
         server,
         config={"num_rounds": args.rounds},
     )
+
+    # Plot mutual information for clients
+    plot_mi_for_clients(server, client_manager)
 
 
 #def fit_config(rnd: int, batch=args.batch_size) -> Dict[str, fl.common.Scalar]:

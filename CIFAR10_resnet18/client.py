@@ -109,6 +109,7 @@ class CifarClient(fl.client.Client):
             'layerSizes': [32] * 1,
             'activationFunctions': ['relu'] * 1
         }, divergenceMeasure='KL', learningRate=1e-3)
+        self.mi_values = []
 
     def get_parameters(self) -> ParametersRes:
         print(f"Client {self.cid}: get_parameters")
@@ -220,7 +221,7 @@ class CifarClient(fl.client.Client):
         # Calculate mutual information
         mi_estimate = match_dimensions_and_calculate_mi(gradients, representative_inputs)
         print(f"Client {self.cid}: Mutual Information after fit round: {mi_estimate}")
-
+        self.mi_values.append(mi_estimate)
         # Return the refined weights and the number of examples used for training
         weights_prime: Weights = get_weights(self.model)
         params_prime = fl.common.weights_to_parameters(weights_prime)
@@ -307,6 +308,13 @@ class CifarClient(fl.client.Client):
     #     return EvaluateRes(num_examples=len(self.testset), loss=float(loss), metrics=metrics)
 
 
+    def plot_mutual_information(client):
+        plt.figure(figsize=(8, 6))
+        plt.plot(range(len(client.mi_values)), client.mi_values, marker='o')
+        plt.title(f'Mutual Information - Client {client.cid}')
+        plt.xlabel('Fit Round')
+        plt.ylabel('Mutual Information')
+        plt.show()
 
 def main() -> None:
     """Load data, create and start CifarClient."""
