@@ -122,56 +122,6 @@ class CifarClient(fl.client.Client):
         # instantiate model
         self.model = m()
 
-    # def fit(self, ins: FitIns) -> FitRes:
-    #     print(f"Client {self.cid}: fit")
-
-    #     weights: Weights = fl.common.parameters_to_weights(ins.parameters)
-    #     config = ins.config
-    #     fit_begin = timeit.default_timer()
-
-    #     # Get training config
-    #     epochs = int(config["epochs"])
-    #     batch_size = int(config["batch_size"])
-    #     pin_memory = bool(config["pin_memory"])
-    #     num_workers = int(config["num_workers"])
-
-    #     # fix_for_drop
-    #     p = float(config["p"])
-    #     if (p != self.p):
-    #         print("changing p from " + str(self.p) + " to " + str(p))
-    #         self.p = p
-    #         self.model = utils.load_model("ResNet18", self.p)
-    #         self.model.to(self.device)
-
-    #     # Set model parameters
-    #     set_weights(self.model, weights)
-
-    #     if torch.cuda.is_available():
-    #         kwargs = {
-    #             "num_workers": num_workers,
-    #             "pin_memory": pin_memory,
-    #             "drop_last": True,
-    #         }
-    #     else:
-    #         kwargs = {"drop_last": True}
-
-        # # Train model
-        # trainloader = torch.utils.data.DataLoader(
-        #     self.trainset, batch_size=batch_size, shuffle=True, **kwargs
-        # )
-        # t = time()
-        # utils.train(self.model, trainloader, epochs=epochs, device=self.device)
-        # fitTime = time() - t
-
-    #     # Return the refined weights and the number of examples used for training
-    #     weights_prime: Weights = get_weights(self.model)
-    #     params_prime = fl.common.weights_to_parameters(weights_prime)
-    #     num_examples_train = len(self.trainset)
-    #     metrics = {"duration": timeit.default_timer() - fit_begin}
-    #     return FitRes(
-    #         parameters=params_prime, num_examples=num_examples_train, metrics=metrics, fit_duration=fitTime
-    #     )
-
     def fit(self, ins: FitIns) -> FitRes:
         print(f"Client {self.cid}: fit")
 
@@ -210,25 +160,75 @@ class CifarClient(fl.client.Client):
             self.trainset, batch_size=batch_size, shuffle=True, **kwargs
         )
         t = time()
-        gradients, representative_inputs = utils.train_mi(self.model, trainloader, epochs=epochs, device=self.device)
-        print(gradients.shape)
-        print(representative_inputs.shape)
+        utils.train(self.model, trainloader, epochs=epochs, device=self.device)
         fitTime = time() - t
 
-        # Calculate mutual information
-        mi_estimate = match_dimensions_and_calculate_mi(gradients, representative_inputs)
-        print(f"Client {self.cid}: Mutual Information after fit round: {mi_estimate}")
-        self.mi_values.append(mi_estimate)
         # Return the refined weights and the number of examples used for training
         weights_prime: Weights = get_weights(self.model)
         params_prime = fl.common.weights_to_parameters(weights_prime)
         num_examples_train = len(self.trainset)
         metrics = {"duration": timeit.default_timer() - fit_begin}
-        # Include MI in the metrics
-        metrics.update({"mutual_information": mi_estimate})
         return FitRes(
             parameters=params_prime, num_examples=num_examples_train, metrics=metrics, fit_duration=fitTime
         )
+
+    # def fit(self, ins: FitIns) -> FitRes:
+    #     print(f"Client {self.cid}: fit")
+
+    #     weights: Weights = fl.common.parameters_to_weights(ins.parameters)
+    #     config = ins.config
+    #     fit_begin = timeit.default_timer()
+
+    #     # Get training config
+    #     epochs = int(config["epochs"])
+    #     batch_size = int(config["batch_size"])
+    #     pin_memory = bool(config["pin_memory"])
+    #     num_workers = int(config["num_workers"])
+
+    #     # fix_for_drop
+    #     p = float(config["p"])
+    #     if (p != self.p):
+    #         print("changing p from " + str(self.p) + " to " + str(p))
+    #         self.p = p
+    #         self.model = utils.load_model("ResNet18", self.p)
+    #         self.model.to(self.device)
+
+    #     # Set model parameters
+    #     set_weights(self.model, weights)
+
+    #     if torch.cuda.is_available():
+    #         kwargs = {
+    #             "num_workers": num_workers,
+    #             "pin_memory": pin_memory,
+    #             "drop_last": True,
+    #         }
+    #     else:
+    #         kwargs = {"drop_last": True}
+
+    #     # Train model
+    #     trainloader = torch.utils.data.DataLoader(
+    #         self.trainset, batch_size=batch_size, shuffle=True, **kwargs
+    #     )
+    #     t = time()
+    #     gradients, representative_inputs = utils.train_mi(self.model, trainloader, epochs=epochs, device=self.device)
+    #     print(gradients.shape)
+    #     print(representative_inputs.shape)
+    #     fitTime = time() - t
+
+    #     # Calculate mutual information
+    #     mi_estimate = match_dimensions_and_calculate_mi(gradients, representative_inputs)
+    #     print(f"Client {self.cid}: Mutual Information after fit round: {mi_estimate}")
+    #     self.mi_values.append(mi_estimate)
+    #     # Return the refined weights and the number of examples used for training
+    #     weights_prime: Weights = get_weights(self.model)
+    #     params_prime = fl.common.weights_to_parameters(weights_prime)
+    #     num_examples_train = len(self.trainset)
+    #     metrics = {"duration": timeit.default_timer() - fit_begin}
+    #     # Include MI in the metrics
+    #     metrics.update({"mutual_information": mi_estimate})
+    #     return FitRes(
+    #         parameters=params_prime, num_examples=num_examples_train, metrics=metrics, fit_duration=fitTime
+    #     )
         
     def evaluate(self, ins: EvaluateIns) -> EvaluateRes:
         print(f"Client {self.cid}: evaluate")
@@ -281,26 +281,26 @@ class CifarClient(fl.client.Client):
         # )
 
 
-    #     print(f"Estimated Mutual Information: {mi_estimate} nats")
+        # print(f"Estimated Mutual Information: {mi_estimate} nats")
 
-    #     metrics = {"accuracy": float(accuracy), "mutual_info": mi_estimate}  
+        # metrics = {"accuracy": float(accuracy), "mutual_info": mi_estimate}  
 
-    #     # Convert log to a DataFrame if it's not already one
-    #     if not isinstance(log, pd.DataFrame):
-    #         log_df = pd.DataFrame(log)
-    #     else:
-    #         log_df = log
+        # # Convert log to a DataFrame if it's not already one
+        # if not isinstance(log, pd.DataFrame):
+        #     log_df = pd.DataFrame(log)
+        # else:
+        #     log_df = log
 
-    #     # Plotting the estimated values by epoch
-    #     grid = sns.FacetGrid(log_df, col='name', hue='split', sharey=False, col_order=['loss', 'mutual_information'])
-    #     grid.map(sns.lineplot, 'epoch', 'value')
-    #     grid.add_legend()
-    #     grid.set_titles(col_template='{col_name}')
+        # # Plotting the estimated values by epoch
+        # grid = sns.FacetGrid(log_df, col='name', hue='split', sharey=False, col_order=['loss', 'mutual_information'])
+        # grid.map(sns.lineplot, 'epoch', 'value')
+        # grid.add_legend()
+        # grid.set_titles(col_template='{col_name}')
 
-    #      # Save the plot to a file
-    #     plt.savefig('./MIPlots/mutual_information_plot.png')  
+        #  # Save the plot to a file
+        # plt.savefig('./MIPlots/mutual_information_plot.png')  
 
-    #     plt.close('all')  
+        # plt.close('all')  
 
     #     return EvaluateRes(num_examples=len(self.testset), loss=float(loss), metrics=metrics)
 

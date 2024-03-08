@@ -153,9 +153,7 @@ def main() -> None:
     )
 
     # Plot mutual information for clients
-    print("before plot")
-    plot_mi_for_clients(server, client_manager)
-    print("after plot")
+    # plot_mi_for_clients(server, client_manager)
 
 
 #def fit_config(rnd: int, batch=args.batch_size) -> Dict[str, fl.common.Scalar]:
