@@ -17,8 +17,10 @@
 
 import argparse
 from collections import OrderedDict
+import os
 from typing import Callable, Dict, Optional, Tuple
-from client import plot_mutual_information
+
+from matplotlib import pyplot as plt
 
 import flwr as fl
 import numpy as np
@@ -92,6 +94,21 @@ parser.add_argument(
 parser.add_argument("--pin_memory", action="store_true")
 args = parser.parse_args()
 
+def plot_mutual_information(client):
+    plt.figure(figsize=(8, 6))
+    plt.plot(range(len(client.mi_values)), client.mi_values, marker='o', label='MI Value')
+    plt.title(f'Mutual Information - Client {client.cid}')
+    plt.xlabel('Training Round')
+    plt.ylabel('Mutual Information')
+    plt.legend()
+
+    save_dir = 'MIPlots'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir) 
+
+    plt.savefig(f'./{save_dir}/Mutual_Information_Client_{client.cid}.png')
+    plt.close()  
+        
 def plot_mi_for_clients(server, client_manager):
     """Plot mutual information for each client after training."""
     clients = client_manager.all()
@@ -136,7 +153,9 @@ def main() -> None:
     )
 
     # Plot mutual information for clients
+    print("before plot")
     plot_mi_for_clients(server, client_manager)
+    print("after plot")
 
 
 #def fit_config(rnd: int, batch=args.batch_size) -> Dict[str, fl.common.Scalar]:

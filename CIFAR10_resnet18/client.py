@@ -62,13 +62,10 @@ def match_dimensions_and_calculate_mi(gradients, inputs, sample_size=1024):
     """
     inputs_flat = inputs.view(-1)  # [16*3*32*32]
     
-    # Ensure sample_size is feasible
     sample_size = min(sample_size, inputs_flat.size(0), gradients.size(0))
     
-    # Randomly sample indices
     indices = np.random.choice(inputs_flat.size(0), sample_size, replace=False)
     
-    # Sample from inputs and gradients
     inputs_sample = inputs_flat[torch.tensor(indices)].cpu().numpy()
     gradients_sample = gradients[torch.tensor(indices)].cpu().numpy()
     
@@ -208,7 +205,7 @@ class CifarClient(fl.client.Client):
         else:
             kwargs = {"drop_last": True}
 
-            # Train model
+        # Train model
         trainloader = torch.utils.data.DataLoader(
             self.trainset, batch_size=batch_size, shuffle=True, **kwargs
         )
@@ -306,15 +303,6 @@ class CifarClient(fl.client.Client):
     #     plt.close('all')  
 
     #     return EvaluateRes(num_examples=len(self.testset), loss=float(loss), metrics=metrics)
-
-
-    def plot_mutual_information(client):
-        plt.figure(figsize=(8, 6))
-        plt.plot(range(len(client.mi_values)), client.mi_values, marker='o')
-        plt.title(f'Mutual Information - Client {client.cid}')
-        plt.xlabel('Fit Round')
-        plt.ylabel('Mutual Information')
-        plt.show()
 
 def main() -> None:
     """Load data, create and start CifarClient."""
